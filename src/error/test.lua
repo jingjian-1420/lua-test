@@ -26,13 +26,18 @@ local a,b,c=xpcall(function()
     local i = io.read("*n");
     if i == 10 then
         print(i)
+        return i,123 ;
     else
-        error({aa="bb"})
+        error({aa="bb"});
+        print(134);
     end
 end,function(d)
-    print(d)
-    print(debug.debug())
-    print(debug.traceback())
+    print(d.aa)
+    --print(debug.debug())
+    -- print(debug.traceback())
+    return d;
 end)
-print(a)
+print(a);
+print( b.aa);
+print(c);
 
