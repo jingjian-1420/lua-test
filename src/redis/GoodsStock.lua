@@ -174,12 +174,12 @@ local result = valid();
 if result == nil then
     local status,r =xpcall(
             function()
-                --减内存
+                --减库存
                 subStock();
                return getResponseInfo(SUCCESS_CODE,"成功");
             end,
             function(e)
-                -- 加内存
+                -- 加库存
                 plusStock();
                 return e;
             end);

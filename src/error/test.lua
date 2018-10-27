@@ -38,6 +38,6 @@ end,function(d)
     return d;
 end)
 print(a);
-print( b.aa);
+print(b);
 print(c);
 
