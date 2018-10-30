@@ -45,8 +45,8 @@ local  unserialize = function(lua)
 end
 
 -- 数据结构：KEY
--- product:1:stock
--- goods:1:stock
+-- {product}:1:stock
+-- {product}_goods:1:stock
 -- code            说明：
 local NO_EXIST_KEYS_CODE = "NO_EXIST_KEYS";
 local NO_EXIST_ARGV_CODE = "NO_EXIST_ARGV";
@@ -57,11 +57,11 @@ local ERROR_CODE = "ERROR";
 local SUCCESS_CODE = "SUCCESS";
 
 -- 商品 field
-local product_pre ="product:";
+local product_pre ="{product}:";
 local product_suf = ":stock";
 
 -- 货品 field
-local goods_pre = "goods:";
+local goods_pre = "{product}_goods:";
 local goods_suf = ":stock";
 -- 回滚表
 local callBackTab = {};
@@ -82,27 +82,27 @@ local valid = function()
     end
 end
 
--- 减库存
+-- 加库存
 local subStock = function()
     for i, v in ipairs(ARGV) do
         local goods_tab =  unserialize(v);
         local productId =  goods_tab.productId;
-        local stock = goods_tab.stock;
-        local goodsId =  goods_tab.goodsId;
+        local stockNum = goods_tab.stockNum;
+        local productGoodsId =  goods_tab.productGoodsId;
 
         if productId == nil then
             error(getResponseInfo(MISS_PARAM_CODE,"缺失:productId"));
         end
-        if  stock == nil then
-            error(getResponseInfo(MISS_PARAM_CODE,"缺失:stock"));
+        if  stockNum == nil then
+            error(getResponseInfo(MISS_PARAM_CODE,"缺失:stockNum"));
         end
-        if goodsId == nil then
-            error(getResponseInfo(MISS_PARAM_CODE,"缺失:goodsId"));
+        if productGoodsId == nil then
+            error(getResponseInfo(MISS_PARAM_CODE,"缺失:productGoodsId"));
         end
         -- 商品key
         local ks = {};
         ks[1] = product_pre .. productId .. product_suf;
-        ks[2] = goods_pre .. goodsId .. goods_suf;
+        ks[2] = goods_pre .. productGoodsId .. goods_suf;
         local el = {};
 
 
@@ -114,58 +114,48 @@ local subStock = function()
             end
         end
 
-        -- 减商品库存
-        local aclPStock =redis.pcall("DECRBY",ks[1],stock);
+        -- 加商品库存
+        local aclPStock =redis.pcall("INCRBY",ks[1], stockNum);
 
         if aclPStock.err ~= nil then -- 处理调用报错
             error(getResponseInfo(ERROR_CODE,aclPStock.err));
-        elseif aclPStock < 0 then
-            el.productId = productId;
-            el.stock = stock;
-            callBackTab[i]=el;
-            error(getResponseInfo(UNDER_STOCK_CODE,"商品id:".. productId .. "剩余库存不足"));
         else
             el.productId = productId;
-            el.stock = stock;
+            el.stockNum = stockNum;
             callBackTab[i]=el;
         end
 
-        -- 减货品库存
-        local aclGStock =redis.pcall("DECRBY",ks[2],stock);
+        -- 加货品库存
+        local aclGStock =redis.pcall("INCRBY",ks[2], stockNum);
         if aclGStock.err ~= nil then -- 处理调用报错
             error(getResponseInfo(ERROR_CODE,aclGStock.err));
-        elseif aclGStock < 0 then
-            el.goodsId = goodsId;
-            el.stock = stock;
-            callBackTab[i]=el;
-            error(getResponseInfo(UNDER_STOCK_CODE,"货品id:".. goodsId .. "剩余库存不足"));
         else
-            el.goodsId = goodsId;
-            el.stock = stock;
+            el.productGoodsId = productGoodsId;
+            el.stockNum = stockNum;
             callBackTab[i]=el;
         end
     end
 end
 
--- 加库存
+-- 减库存
 local plusStock = function()
     for i, v in ipairs(callBackTab) do
         local goods_tab = v;
         local productId =  goods_tab.productId;
-        local stock = goods_tab.stock;
-        local goodsId =  goods_tab.goodsId;
+        local stockNum = goods_tab.stockNum;
+        local productGoodsId =  goods_tab.productGoodsId;
 
         local product_key = product_pre .. productId .. product_suf;
-        local goods_key= goods_pre .. goodsId .. goods_suf;
+        local goods_key= goods_pre .. productGoodsId .. goods_suf;
 
-        -- 商品id 不为 nil 加库存
+        -- 商品id 不为 nil 减库存
         if productId ~= nil then
-            redis.pcall("INCRBY",product_key,stock);
+            redis.pcall("DECRBY",product_key, stockNum);
         end
 
-        -- 货品id 不为 nil 加库存
-        if goodsId ~= nil then
-            redis.pcall("INCRBY",goods_key,stock);
+        -- 货品id 不为 nil 减库存
+        if productGoodsId ~= nil then
+            redis.pcall("DECRBY",goods_key, stockNum);
         end
     end
 end
