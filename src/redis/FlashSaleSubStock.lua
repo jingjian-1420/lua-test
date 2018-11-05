@@ -1,3 +1,27 @@
+-- 数据结构：KEY
+-- act_flash_sale_{product}:1:stock
+-- code            说明：
+local NO_EXIST_KEYS_CODE = "NO_EXIST_KEYS";
+local NO_EXIST_ARGV_CODE = "NO_EXIST_ARGV";
+local MISS_PARAM_CODE = "MISS_PARAM";
+local REDIS_MISS_KEY_CODE = "REDIS_MISS_KEY_CODE";
+local UNDER_STOCK_CODE = "UNDER_STOCK";
+local ERROR_CODE = "ERROR";
+local SUCCESS_CODE = "SUCCESS";
+
+
+-- 秒杀前缀 field
+local act_flash_sale_pre ="act_flash_sale_product:";
+local act_flash_sale_suf = ":stock";
+
+-- 回滚表
+local callBackTab = {};
+
+-- 获取响应结果信息
+local getResponseInfo = function(c,m)
+    return {c,m};
+end
+
 local serialize= function(obj)
     local lua = ""
     local t = type(obj)
@@ -22,7 +46,7 @@ local serialize= function(obj)
     elseif t == "nil" then
         return nil
     else
-        error("can not serialize a " .. t .. " type.")
+        error(getResponseInfo(ERROR_CODE,"can not serialize a " .. t .. " type."))
     end
     return lua
 end
@@ -34,7 +58,7 @@ local  unserialize = function(lua)
     elseif t == "number" or t == "string" or t == "boolean" then
         lua = tostring(lua)
     else
-        error("can not unserialize a " .. t .. " type.")
+        error(getResponseInfo(ERROR_CODE,"can not unserialize a " .. t .. " type."))
     end
     lua = "return " .. lua
     local func = loadstring(lua)
@@ -42,30 +66,6 @@ local  unserialize = function(lua)
         return nil
     end
     return func()
-end
-
--- 数据结构：KEY
--- act_flash_sale_{product}:1:stock
--- code            说明：
-local NO_EXIST_KEYS_CODE = "NO_EXIST_KEYS";
-local NO_EXIST_ARGV_CODE = "NO_EXIST_ARGV";
-local MISS_PARAM_CODE = "MISS_PARAM";
-local REDIS_MISS_KEY_CODE = "REDIS_MISS_KEY_CODE";
-local UNDER_STOCK_CODE = "UNDER_STOCK";
-local ERROR_CODE = "ERROR";
-local SUCCESS_CODE = "SUCCESS";
-
-
--- 秒杀前缀 field
-local act_flash_sale_pre ="act_flash_sale_{product}:";
-local act_flash_sale_suf = ":stock";
-
--- 回滚表
-local callBackTab = {};
-
--- 获取响应结果信息
-local getResponseInfo = function(c,m)
-    return {code=c,msg=m};
 end
 
 -- 验证
@@ -102,7 +102,7 @@ local subStock = function()
         -- 验证 秒杀库存 Key 存在
         local existKey = redis.pcall("MGET",ks[1]);
         for i, v in ipairs(existKey) do
-            if v == false then -- 不存在的数据 返回 false
+            if v == false or v == "null" then -- 不存在的数据 返回 false
                 error(getResponseInfo(REDIS_MISS_KEY_CODE,"Key:" .. ks[i] .. "不存在"));
             end
         end
@@ -110,9 +110,7 @@ local subStock = function()
         -- 减秒杀库存
         local aclPStock =redis.pcall("DECRBY",ks[1], stockNum);
 
-        if aclPStock.err ~= nil then -- 处理调用报错
-            error(getResponseInfo(ERROR_CODE,aclPStock.err));
-        elseif aclPStock < 0 then
+        if aclPStock < 0 then
             el.actFlashSaleProductId = actFlashSaleProductId;
             el.stockNum = stockNum;
             callBackTab[i]=el;
