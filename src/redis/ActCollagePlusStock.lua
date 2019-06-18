@@ -1,3 +1,14 @@
+
+local redis = require 'redis.redis'
+local host = "192.168.0.196"
+local port = 6379
+client = redis.connect(host, port)
+local b = client:auth("sibu@123456");
+local a = client:ping();
+
+redis.call = function(cmd, ...)
+    return assert(loadstring('return client:'.. string.lower(cmd) ..'(...)'))(...)
+end
 -- 数据结构：KEY
 -- act_collage:id:stock
 -- code            说明：

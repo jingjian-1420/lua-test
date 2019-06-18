@@ -49,3 +49,14 @@ function unserialize(lua)
     end
     return func()
 end
+-- 商品 field
+local product_pre ="product:{";
+local product_suf = "}:stock";
+
+-- 货品 field
+local goods_pre = "product_goods:";
+
+local a = nil;
+
+local product_key = product_pre .. a .. product_suf;
+print(product_key);

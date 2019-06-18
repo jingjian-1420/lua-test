@@ -1,5 +1,5 @@
 local redis = {
-    _VERSION     = 'redis-lua 2.0.4',
+    _VERSION     = 'redis-lua 2.0.5-dev',
     _DESCRIPTION = 'A Lua client library for the redis key value storage system.',
     _COPYRIGHT   = 'Copyright (C) 2009-2012 Daniele Alessandri',
 }
@@ -16,7 +16,7 @@ local defaults = {
     host        = '127.0.0.1',
     port        = 6379,
     tcp_nodelay = true,
-    path        = nil
+    path        = nil,
 }
 
 local function merge_defaults(parameters)
@@ -220,6 +220,51 @@ local function parse_info(response)
     return info
 end
 
+local function scan_request(client, command, ...)
+    local args, req, params = {...}, { }, nil
+
+    if command == 'SCAN' then
+        table.insert(req, args[1])
+        params = args[2]
+    else
+        table.insert(req, args[1])
+        table.insert(req, args[2])
+        params = args[3]
+    end
+
+    if params and params.match then
+        table.insert(req, 'MATCH')
+        table.insert(req, params.match)
+    end
+
+    if params and params.count then
+        table.insert(req, 'COUNT')
+        table.insert(req, params.count)
+    end
+
+    request.multibulk(client, command, req)
+end
+
+local zscan_response = function(reply, command, ...)
+    local original, new = reply[2], { }
+    for i = 1, #original, 2 do
+        table.insert(new, { original[i], tonumber(original[i + 1]) })
+    end
+    reply[2] = new
+
+    return reply
+end
+
+local hscan_response = function(reply, command, ...)
+    local original, new = reply[2], { }
+    for i = 1, #original, 2 do
+        new[original[i]] = original[i + 1]
+    end
+    reply[2] = new
+
+    return reply
+end
+
 local function load_methods(proto, commands)
     local client = setmetatable ({}, getmetatable(proto))
 
@@ -280,24 +325,24 @@ function response.read(client)
             return data
         end
 
-   -- error reply
+        -- error reply
     elseif prefix == '-' then
         return client.error('redis error: ' .. data)
 
-   -- integer reply
+        -- integer reply
     elseif prefix == ':' then
         local number = tonumber(data)
 
         if not number then
-            if res == 'nil' then
+            if data == 'nil' then
                 return nil
             end
-            client.error('cannot parse '..res..' as a numeric response.')
+            client.error('cannot parse ' .. data .. ' as a numeric response.')
         end
 
         return number
 
-   -- bulk reply
+        -- bulk reply
     elseif prefix == '$' then
         local length = tonumber(data)
 
@@ -313,7 +358,7 @@ function response.read(client)
 
         return nextchunk:sub(1, -3)
 
-   -- multibulk reply
+        -- multibulk reply
     elseif prefix == '*' then
         local count = tonumber(data)
 
@@ -330,7 +375,7 @@ function response.read(client)
         end
         return list
 
-   -- unknown type of reply
+        -- unknown type of reply
     else
         return client.error('unknown response prefix: ' .. prefix)
     end
@@ -363,8 +408,8 @@ function request.multibulk(client, command, ...)
     buffer[2] = '$' .. #command .. "\r\n" .. command .. "\r\n"
 
     local table_insert = table.insert
-    for _, argument in pairs(args) do
-        local s_argument = tostring(argument)
+    for i = 1, argsn do
+        local s_argument = tostring(args[i] or '')
         table_insert(buffer, '$' .. #s_argument .. "\r\n" .. s_argument .. "\r\n")
     end
 
@@ -402,9 +447,9 @@ end
 local define_command_impl = function(target, name, opts)
     local opts = opts or {}
     target[string.lower(name)] = custom(
-        opts.command or string.upper(name),
-        opts.request or request.multibulk,
-        opts.response or nil
+            opts.command or string.upper(name),
+            opts.request or request.multibulk,
+            opts.response or nil
     )
 end
 
@@ -620,20 +665,20 @@ do
             client.error('WATCH inside MULTI is not allowed')
         end
         setmetatable(transaction_client, { __index = function(t, k)
-                local cmd = client[k]
-                if type(cmd) == "function" then
-                    local function queuey(self, ...)
-                        local reply = cmd(client, ...)
-                        assert((reply or emptytable).queued == true, 'a QUEUED reply was expected')
-                        table_insert(queued_parsers, reply.parser or identity)
-                        return reply
-                    end
-                    t[k]=queuey
-                    return queuey
-                else
-                    return cmd
+            local cmd = client[k]
+            if type(cmd) == "function" then
+                local function queuey(self, ...)
+                    local reply = cmd(client, ...)
+                    assert((reply or emptytable).queued == true, 'a QUEUED reply was expected')
+                    table_insert(queued_parsers, reply.parser or identity)
+                    return reply
                 end
+                t[k]=queuey
+                return queuey
+            else
+                return cmd
             end
+        end
         })
         client:multi()
         return coro
@@ -686,7 +731,7 @@ do
         end
 
         if not options.watch then
-            watch_keys = { }
+            local watch_keys = { }
             for i, v in pairs(options) do
                 if tonumber(i) then
                     table.insert(watch_keys, v)
@@ -759,6 +804,10 @@ end
 
 local function connect_tcp(socket, parameters)
     local host, port = parameters.host, tonumber(parameters.port)
+    if parameters.timeout then
+        socket:settimeout(parameters.timeout, 't')
+    end
+
     local ok, err = socket:connect(host, port)
     if not ok then
         redis.error('could not connect to '..host..':'..port..' ['..err..']')
@@ -816,6 +865,8 @@ function redis.connect(...)
                     for k, v in parameters.query:gmatch('([-_%w]+)=([-_%w]+)') do
                         if k == 'tcp_nodelay' or k == 'tcp-nodelay' then
                             parameters.tcp_nodelay = parse_boolean(v)
+                        elseif k == 'timeout' then
+                            parameters.timeout = tonumber(v)
                         end
                     end
                 end
@@ -824,8 +875,8 @@ function redis.connect(...)
             end
         end
     elseif #args > 1 then
-        local host, port = unpack(args)
-        parameters = { host = host, port = port }
+        local host, port, timeout = unpack(args)
+        parameters = { host = host, port = port, timeout = tonumber(timeout) }
     end
 
     local commands = redis.commands or {}
@@ -903,17 +954,12 @@ redis.commands = {
             return response
         end
     }),
-    randomkey        = command('RANDOMKEY', {
-        response = function(response)
-            if response == '' then
-                return nil
-            else
-                return response
-            end
-        end
-    }),
+    randomkey        = command('RANDOMKEY'),
     sort             = command('SORT', {
         request = sort_request,
+    }),
+    scan             = command('SCAN', {        -- >= 2.8
+        request = scan_request,
     }),
 
     -- commands operating on string values
@@ -949,6 +995,8 @@ redis.commands = {
     getrange         = command('GETRANGE'),     -- >= 2.2
     setbit           = command('SETBIT'),       -- >= 2.2
     getbit           = command('GETBIT'),       -- >= 2.2
+    bitop            = command('BITOP'),        -- >= 2.6
+    bitcount         = command('BITCOUNT'),     -- >= 2.6
 
     -- commands operating on lists
     rpush            = command('RPUSH'),
@@ -988,10 +1036,17 @@ redis.commands = {
     sdiffstore       = command('SDIFFSTORE'),
     smembers         = command('SMEMBERS'),
     srandmember      = command('SRANDMEMBER'),
+    sscan            = command('SSCAN', {       -- >= 2.8
+        request = scan_request,
+    }),
 
     -- commands operating on sorted sets
     zadd             = command('ZADD'),
-    zincrby          = command('ZINCRBY'),
+    zincrby          = command('ZINCRBY', {
+        response = function(reply, command, ...)
+            return tonumber(reply)
+        end,
+    }),
     zrem             = command('ZREM'),
     zrange           = command('ZRANGE', {
         request  = zset_range_request,
@@ -1022,6 +1077,10 @@ redis.commands = {
     zrank            = command('ZRANK'),                -- >= 2.0
     zrevrank         = command('ZREVRANK'),             -- >= 2.0
     zremrangebyrank  = command('ZREMRANGEBYRANK'),      -- >= 2.0
+    zscan            = command('ZSCAN', {               -- >= 2.8
+        request  = scan_request,
+        response = zscan_response,
+    }),
 
     -- commands operating on hashes
     hset             = command('HSET', {        -- >= 2.0
@@ -1061,6 +1120,10 @@ redis.commands = {
             for i = 1, #reply, 2 do new_reply[reply[i]] = reply[i + 1] end
             return new_reply
         end
+    }),
+    hscan            = command('HSCAN', {       -- >= 2.8
+        request  = scan_request,
+        response = hscan_response,
     }),
 
     -- connection related commands
