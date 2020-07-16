@@ -3,16 +3,13 @@
 --- Created by wei.
 --- DateTime: 2018/10/27 9:56
 ---
-require("transition.StringAndTableTB");
-local ta = Common:unserialize("{productId=1,stock=0}");
-local ta_str = Common:serialize(ta);
-print(ta.productId);
 
-print(ta_str)
+require "mobdebug".start()
+-- require("mobdebug").start("host-ip", port) --默认值为 "localhost", 8172
 
-if ta.aa == nil then
-    print(true);
-else
-    print(false)
-end
+
+
+
+
+
 
